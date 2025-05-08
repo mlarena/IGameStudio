@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Tank Game</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            display: block; 
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            text-shadow: 2px 2px 4px black;
+            pointer-events: none;
+        }
+        #logo {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        #kills {
+            font-size: 20px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="logo">Igor Game Studio</div>
+        <div id="kills">Уничтожено: 0</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Инициализация сцены, камеры и рендерера
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Счётчик убийств
+        let killCount = 0;
+        const killsElement = document.getElementById('kills');
+
+        // Освещение
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(5, 10, 7);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // Земля (просто зелёная плоскость без текстуры)
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshStandardMaterial({ color: 0x00aa00 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Деревья
+        function createTree(x, z) {
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.3, 2),
+                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+            );
+            trunk.position.set(x, 1, z);
+            
+            const leaves = new THREE.Mesh(
+                new THREE.ConeGeometry(1.5, 3),
+                new THREE.MeshStandardMaterial({ color: 0x00aa00 })
+            );
+            leaves.position.set(x, 3.5, z);
+            
+            scene.add(trunk);
+            scene.add(leaves);
+        }
+
+        // Создаём деревья
+        for (let i = 0; i < 20; i++) {
+            createTree(
+                Math.random() * 80 - 40,
+                Math.random() * 80 - 40
+            );
+        }
+
+        // Танк игрока
+        const tank = new THREE.Group();
+
+        // Корпус
+        const body = new THREE.Mesh(
+            new THREE.BoxGeometry(3, 1.5, 4),
+            new THREE.MeshStandardMaterial({ color: 0x5555ff })
+        );
+        body.position.y = 1.5;
+        tank.add(body);
+
+        // Башня
+        const turret = new THREE.Mesh(
+            new THREE.CylinderGeometry(1, 1, 0.8, 32),
+            new THREE.MeshStandardMaterial({ color: 0x3333aa })
+        );
+        turret.position.y = 2.3;
+        turret.rotation.x = Math.PI / 2;
+        tank.add(turret);
+
+        // Пушка
+        const gun = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.2, 0.2, 2, 32),
+            new THREE.MeshStandardMaterial({ color: 0x888888 })
+        );
+        gun.position.y = 2.3;
+        gun.position.z = -1;
+        gun.rotation.x = Math.PI / 2;
+        tank.add(gun);
+
+        scene.add(tank);
+
+        // Камера
+        camera.position.set(0, 5, -10);
+        camera.lookAt(tank.position);
+
+        // Пули
+        const bullets = [];
+        const bulletSpeed = 0.5;
+
+        // Вражеские танки
+        const enemies = [];
+        const enemySpeed = 0.05;
+
+        function createEnemy() {
+            const enemy = new THREE.Group();
+            enemy.userData = {
+                health: 5,
+                body: null
+            };
+
+            // Корпус
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 1.5, 4),
+                new THREE.MeshStandardMaterial({ color: 0xff5555 })
+            );
+            body.position.y = 1.5;
+            enemy.add(body);
+            enemy.userData.body = body;
+
+            // Башня
+            const turret = new THREE.Mesh(
+                new THREE.CylinderGeometry(1, 1, 0.8, 32),
+                new THREE.MeshStandardMaterial({ color: 0xaa3333 })
+            );
+            turret.position.y = 2.3;
+            turret.rotation.x = Math.PI / 2;
+            enemy.add(turret);
+
+            // Пушка
+            const gun = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.2, 0.2, 2, 32),
+                new THREE.MeshStandardMaterial({ color: 0x666666 })
+            );
+            gun.position.y = 2.3;
+            gun.position.z = -1;
+            gun.rotation.x = Math.PI / 2;
+            enemy.add(gun);
+
+            // Позиция
+            enemy.position.x = Math.random() * 80 - 40;
+            enemy.position.z = Math.random() * 80 - 40;
+            enemy.rotation.y = Math.random() * Math.PI * 2;
+
+            scene.add(enemy);
+            enemies.push(enemy);
+            return enemy;
+        }
+
+        // Взрыв
+        function createExplosion(position) {
+            const explosion = new THREE.Mesh(
+                new THREE.SphereGeometry(1, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.8 })
+            );
+            explosion.position.copy(position);
+            scene.add(explosion);
+
+            let scale = 1;
+            const animateExplosion = () => {
+                scale += 0.1;
+                explosion.scale.set(scale, scale, scale);
+                explosion.material.opacity -= 0.05;
+
+                if (explosion.material.opacity > 0) {
+                    requestAnimationFrame(animateExplosion);
+                } else {
+                    scene.remove(explosion);
+                }
+            };
+            animateExplosion();
+        }
+
+        // Управление
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // Проверка столкновений пуль с врагами
+        function checkCollisions() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    
+                    // Проверяем расстояние между пулей и врагом
+                    if (bullet.position.distanceTo(enemy.position) < 2.5) {
+                        // Уменьшаем здоровье врага
+                        enemy.userData.health--;
+                        
+                        // Меняем цвет в зависимости от здоровья
+                        const intensity = enemy.userData.health / 5;
+                        enemy.userData.body.material.color.setRGB(intensity, 0, 0);
+                        
+                        // Удаляем пулю
+                        scene.remove(bullet);
+                        bullets.splice(i, 1);
+                        
+                        // Если здоровье закончилось
+                        if (enemy.userData.health <= 0) {
+                            createExplosion(enemy.position);
+                            scene.remove(enemy);
+                            enemies.splice(j, 1);
+                            createEnemy();
+                            killCount++;
+                            killsElement.textContent = `Уничтожено: ${killCount}`;
+                        }
+                        
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Игровой цикл
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+
+            // Движение танка
+            if (keys['KeyW']) {
+                tank.position.z -= 0.1 * Math.cos(tank.rotation.y);
+                tank.position.x -= 0.1 * Math.sin(tank.rotation.y);
+            }
+            if (keys['KeyS']) {
+                tank.position.z += 0.1 * Math.cos(tank.rotation.y);
+                tank.position.x += 0.1 * Math.sin(tank.rotation.y);
+            }
+            if (keys['KeyA']) tank.rotation.y += 0.03;
+            if (keys['KeyD']) tank.rotation.y -= 0.03;
+
+            // Стрельба
+            if (keys['Space']) {
+                keys['Space'] = false;
+                const bullet = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.2),
+                    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+                );
+                bullet.position.copy(tank.position);
+                bullet.position.y = 2.3;
+                
+                const direction = new THREE.Vector3(0, 0, -1);
+                direction.applyQuaternion(tank.quaternion);
+                bullet.userData = {
+                    velocity: direction.multiplyScalar(bulletSpeed)
+                };
+                
+                scene.add(bullet);
+                bullets.push(bullet);
+            }
+
+            // Движение пуль
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.position.add(bullet.userData.velocity);
+                
+                // Удаляем пули далеко от танка
+                if (bullet.position.distanceTo(tank.position) > 50) {
+                    scene.remove(bullet);
+                    bullets.splice(i, 1);
+                }
+            }
+
+            // Движение врагов
+            enemies.forEach(enemy => {
+                enemy.rotation.y += 0.01;
+            });
+
+            // Проверка столкновений
+            checkCollisions();
+
+            // Камера
+            camera.position.x = tank.position.x;
+            camera.position.z = tank.position.z - 10;
+            camera.lookAt(tank.position);
+
+            renderer.render(scene, camera);
+        }
+
+        // Создаём 5 врагов
+        for (let i = 0; i < 5; i++) {
+            createEnemy();
+        }
+
+        gameLoop();
+
+        // Реакция на изменение размера окна
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
